@@ -1,0 +1,444 @@
+I’ll inspect the existing workspace, identify the app entry point, and then build a playable laptop-friendly fighting game in the current project rather than starting with assumptions. I’ll keep the controls keyboard-first and verify the result locally.I can build it, but this workspace session does not expose a terminal or file-editing tool, so I cannot directly create files in your project.
+
+Here is a complete single-file fighting game you can place in `index.html` and open in a browser:
+
+```html
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Neon Clash</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&display=swap');
+
+    :root {
+      --ink: #f7f4ea;
+      --muted: #a9a7b8;
+      --panel: rgba(13, 15, 31, 0.82);
+      --cyan: #61f4ff;
+      --pink: #ff4f9a;
+      --yellow: #ffd166;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 15% 15%, rgba(255, 79, 154, .2), transparent 30%),
+        radial-gradient(circle at 85% 80%, rgba(97, 244, 255, .16), transparent 32%),
+        #090a14;
+      font-family: Orbitron, monospace;
+    }
+
+    .shell {
+      width: min(1100px, 96vw);
+      padding: 18px;
+      border: 1px solid rgba(255,255,255,.15);
+      background: var(--panel);
+      box-shadow: 0 25px 80px rgba(0,0,0,.48);
+      backdrop-filter: blur(14px);
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 20px;
+      margin-bottom: 14px;
+    }
+
+    h1 {
+      margin: 0;
+      color: var(--yellow);
+      font-size: clamp(24px, 4vw, 44px);
+      letter-spacing: .08em;
+      text-shadow: 4px 4px 0 #39283d;
+    }
+
+    .tagline {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 10px;
+      letter-spacing: .18em;
+    }
+
+    .controls {
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.8;
+      text-align: right;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      border: 1px solid rgba(255,255,255,.18);
+      background: #111326;
+      cursor: crosshair;
+    }
+
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    button {
+      border: 1px solid var(--cyan);
+      padding: 9px 14px;
+      color: var(--cyan);
+      background: transparent;
+      font: inherit;
+      font-size: 10px;
+      letter-spacing: .12em;
+      cursor: pointer;
+    }
+
+    button:hover {
+      color: #071016;
+      background: var(--cyan);
+    }
+
+    @media (max-width: 700px) {
+      header { align-items: start; flex-direction: column; }
+      .controls { text-align: left; }
+      .footer { align-items: start; flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div>
+        <h1>NEON CLASH</h1>
+        <p class="tagline">A QUICKDRAW FIGHTING GAME</p>
+      </div>
+      <div class="controls">
+        PLAYER 1: A / D MOVE · W JUMP · F PUNCH · G KICK<br />
+        PLAYER 2: ← / → MOVE · ↑ JUMP · K PUNCH · L KICK
+      </div>
+    </header>
+
+    <canvas id="game" width="1280" height="720"></canvas>
+
+    <div class="footer">
+      <span>Reduce your opponent's energy to zero.</span>
+      <button id="restart">RESTART MATCH</button>
+    </div>
+  </main>
+
+  <script>
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+    const restart = document.getElementById("restart");
+
+    const W = canvas.width;
+    const H = canvas.height;
+    const floor = 590;
+    const gravity = 1800;
+    const keys = new Set();
+
+    const stars = Array.from({ length: 80 }, (_, i) => ({
+      x: (i * 173) % W,
+      y: 50 + ((i * 97) % 350),
+      r: i % 5 === 0 ? 2 : 1,
+      a: .25 + (i % 7) / 12
+    }));
+
+    let state;
+
+    function fighter(name, x, color, accent, controls, facing) {
+      return {
+        name, x, y: floor - 150, w: 58, h: 150,
+        vx: 0, vy: 0, color, accent, controls, facing,
+        hp: 100, grounded: true, attack: null,
+        hitFlash: 0, stun: 0, wins: 0
+      };
+    }
+
+    function reset() {
+      state = {
+        time: 60,
+        over: false,
+        winner: "",
+        shake: 0,
+        sparks: [],
+        p1: fighter("VOLT", 290, "#61f4ff", "#d9ffff", {
+          left: "a", right: "d", jump: "w", punch: "f", kick: "g"
+        }, 1),
+        p2: fighter("NOVA", 930, "#ff4f9a", "#ffe0ee", {
+          left: "ArrowLeft", right: "ArrowRight", jump: "ArrowUp", punch: "k", kick: "l"
+        }, -1)
+      };
+    }
+
+    function pressed(key) {
+      return keys.has(key);
+    }
+
+    addEventListener("keydown", e => {
+      keys.add(e.key);
+      if (["ArrowLeft", "ArrowRight", "ArrowUp", " "].includes(e.key)) e.preventDefault();
+      if (e.key === "r" && state.over) reset();
+    });
+
+    addEventListener("keyup", e => keys.delete(e.key));
+    restart.onclick = reset;
+
+    function attack(f, type) {
+      if (f.attack || f.stun || !f.grounded) return;
+      f.attack = {
+        type,
+        t: 0,
+        duration: type === "punch" ? .3 : .46,
+        hit: false
+      };
+    }
+
+    function updateFighter(f, enemy, dt) {
+      if (f.hitFlash > 0) f.hitFlash -= dt;
+      if (f.stun > 0) f.stun -= dt;
+
+      if (!f.attack && !f.stun) {
+        const speed = 430;
+        f.vx = 0;
+        if (pressed(f.controls.left)) f.vx = -speed;
+        if (pressed(f.controls.right)) f.vx = speed;
+
+        if (pressed(f.controls.jump) && f.grounded) {
+          f.vy = -750;
+          f.grounded = false;
+        }
+
+        if (pressed(f.controls.punch)) attack(f, "punch");
+        else if (pressed(f.controls.kick)) attack(f, "kick");
+      } else {
+        f.vx *= .82;
+      }
+
+      f.x += f.vx * dt;
+      f.vy += gravity * dt;
+      f.y += f.vy * dt;
+
+      if (f.y + f.h >= floor) {
+        f.y = floor - f.h;
+        f.vy = 0;
+        f.grounded = true;
+      }
+
+      f.x = Math.max(50, Math.min(W - 50 - f.w, f.x));
+
+      if (f.attack) {
+        f.attack.t += dt;
+        const active = f.attack.t > .1 && f.attack.t < f.attack.duration * .72;
+        const range = f.attack.type === "punch" ? 85 : 112;
+
+        if (active && !f.attack.hit &&
+            Math.abs((f.x + f.w / 2) - (enemy.x + enemy.w / 2)) < range) {
+          const damage = f.attack.type === "punch" ? 8 : 13;
+          enemy.hp = Math.max(0, enemy.hp - damage);
+          enemy.stun = .16;
+          enemy.hitFlash = .13;
+          enemy.vx = f.facing * 330;
+          enemy.vy = -170;
+          f.attack.hit = true;
+          state.shake = 8;
+
+          for (let i = 0; i < 12; i++) {
+            state.sparks.push({
+              x: enemy.x + enemy.w / 2,
+              y: enemy.y + 65,
+              vx: (Math.random() - .5) * 600,
+              vy: (Math.random() - .5) * 600,
+              life: .35
+            });
+          }
+        }
+
+        if (f.attack.t >= f.attack.duration) f.attack = null;
+      }
+    }
+
+    function drawBar(x, y, width, hp, color, flip = false) {
+      ctx.fillStyle = "#24263d";
+      ctx.fillRect(x, y, width, 22);
+      ctx.fillStyle = color;
+      const amount = width * hp / 100;
+      ctx.fillRect(flip ? x + width - amount : x, y, amount, 22);
+      ctx.strokeStyle = "rgba(255,255,255,.35)";
+      ctx.strokeRect(x, y, width, 22);
+    }
+
+    function drawFighter(f) {
+      ctx.save();
+      ctx.translate(f.x + f.w / 2, f.y);
+      ctx.scale(f.facing, 1);
+
+      if (f.hitFlash > 0) ctx.globalAlpha = .55;
+
+      ctx.fillStyle = f.color;
+      ctx.shadowColor = f.color;
+      ctx.shadowBlur = 20;
+
+      ctx.beginPath();
+      ctx.arc(0, 25, 24, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillRect(-22, 52, 44, 64);
+      ctx.fillRect(-30, 112, 17, 38);
+      ctx.fillRect(13, 112, 17, 38);
+
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = f.accent;
+      ctx.fillRect(-13, 67, 26, 8);
+
+      ctx.strokeStyle = f.accent;
+      ctx.lineWidth = 12;
+      ctx.lineCap = "square";
+
+      const armY = f.attack ? 72 : 76;
+      const armLength = f.attack ? (f.attack.type === "punch" ? 55 : 38) : 30;
+      ctx.beginPath();
+      ctx.moveTo(18, armY);
+      ctx.lineTo(18 + armLength, armY - (f.attack ? 8 : 0));
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    function drawBackground() {
+      const gradient = ctx.createLinearGradient(0, 0, 0, H);
+      gradient.addColorStop(0, "#171936");
+      gradient.addColorStop(1, "#090a14");
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, W, H);
+
+      stars.forEach(s => {
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(s.x, s.y, s.r, s.r);
+      });
+      ctx.globalAlpha = 1;
+
+      ctx.strokeStyle = "rgba(97,244,255,.12)";
+      ctx.lineWidth = 2;
+      for (let x = 0; x < W; x += 80) {
+        ctx.beginPath();
+        ctx.moveTo(x, floor);
+        ctx.lineTo(W / 2 + (x - W / 2) * .15, 350);
+        ctx.stroke();
+      }
+
+      ctx.fillStyle = "#101225";
+      ctx.fillRect(0, floor, W, H - floor);
+      ctx.strokeStyle = "#61f4ff";
+      ctx.globalAlpha = .4;
+      ctx.beginPath();
+      ctx.moveTo(0, floor);
+      ctx.lineTo(W, floor);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    function draw() {
+      ctx.save();
+      if (state.shake > 0) {
+        ctx.translate((Math.random() - .5) * state.shake, (Math.random() - .5) * state.shake);
+        state.shake *= .82;
+      }
+
+      drawBackground();
+
+      drawBar(70, 55, 430, state.p1.hp, "#61f4ff");
+      drawBar(W - 500, 55, 430, state.p2.hp, "#ff4f9a", true);
+
+      ctx.fillStyle = "#f7f4ea";
+      ctx.font = "700 18px Orbitron";
+      ctx.fillText(state.p1.name, 70, 42);
+      ctx.textAlign = "right";
+      ctx.fillText(state.p2.name, W - 70, 42);
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#ffd166";
+      ctx.font = "900 30px Orbitron";
+      ctx.fillText(Math.ceil(state.time), W / 2, 74);
+
+      drawFighter(state.p1);
+      drawFighter(state.p2);
+
+      state.sparks.forEach(s => {
+        ctx.fillStyle = "#ffd166";
+        ctx.fillRect(s.x, s.y, 5, 5);
+      });
+
+      if (state.over) {
+        ctx.fillStyle = "rgba(5,6,15,.78)";
+        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = "#ffd166";
+        ctx.font = "900 56px Orbitron";
+        ctx.fillText(state.winner, W / 2, H / 2 - 20);
+        ctx.fillStyle = "#f7f4ea";
+        ctx.font = "500 16px Orbitron";
+        ctx.fillText("PRESS R OR RESTART MATCH", W / 2, H / 2 + 35);
+      }
+
+      ctx.restore();
+    }
+
+    let last = performance.now();
+
+    function loop(now) {
+      const dt = Math.min((now - last) / 1000, .033);
+      last = now;
+
+      if (!state.over) {
+        state.time = Math.max(0, state.time - dt);
+        updateFighter(state.p1, state.p2, dt);
+        updateFighter(state.p2, state.p1, dt);
+
+        if (state.p1.hp <= 0 || state.p2.hp <= 0 || state.time <= 0) {
+          state.over = true;
+          state.winner =
+            state.p1.hp === state.p2.hp
+              ? "DRAW"
+              : state.p1.hp > state.p2.hp ? "VOLT WINS" : "NOVA WINS";
+        }
+      }
+
+      state.sparks.forEach(s => {
+        s.x += s.vx * dt;
+        s.y += s.vy * dt;
+        s.vy += gravity * .4 * dt;
+        s.life -= dt;
+      });
+      state.sparks = state.sparks.filter(s => s.life > 0);
+
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    reset();
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
+```
+
+Controls:
+
+- Player 1: `A/D` move, `W` jump, `F` punch, `G` kick
+- Player 2: `Arrow Left/Right` move, `Arrow Up` jump, `K` punch, `L` kick
+- Press `R` or click `RESTART MATCH` after a round ends
+
+The game uses an HTML canvas animation loop and keyboard events, which are supported directly by modern browsers. ([developer.mozilla.org](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D?utm_source=openai))
